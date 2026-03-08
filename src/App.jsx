@@ -7,18 +7,17 @@ import Payouts from "./pages/Payouts";
 import Orders from "./pages/Orders";
 import Products from "./pages/Products";
 import Users from "./pages/Users";
+import Categories from "./pages/Categories";
 import useAuthStore from "./store/authStore";
 
 function ProtectedRoute({ children }) {
   const { isLoggedIn } = useAuthStore();
   return isLoggedIn ? children : <Navigate to="/login" />;
 }
-
 function GuestRoute({ children }) {
   const { isLoggedIn } = useAuthStore();
   return !isLoggedIn ? children : <Navigate to="/dashboard" />;
 }
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -31,6 +30,7 @@ export default function App() {
         <Route path="/payouts" element={<ProtectedRoute><Payouts /></ProtectedRoute>} />
         <Route path="/orders" element={<ProtectedRoute><Orders /></ProtectedRoute>} />
         <Route path="/products" element={<ProtectedRoute><Products /></ProtectedRoute>} />
+        <Route path="/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
       </Routes>
     </BrowserRouter>

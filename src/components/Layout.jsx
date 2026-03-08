@@ -16,6 +16,7 @@ export default function Layout({ children }) {
     { to: "/dropship-orders", icon: "📦", label: "Dropship Orders" },
     { to: "/orders", icon: "🛒", label: "NagNail Orders" },
     { to: "/products", icon: "🏷️", label: "Products" },
+    { to: "/categories", icon: "📂", label: "Categories" },
     { to: "/users", icon: "👤", label: "Customers" },
     { to: "/payouts", icon: "💰", label: "Payouts" },
   ];
