@@ -52,6 +52,12 @@ export default function Login() {
             className="w-full bg-[#16a34a] text-white py-3 rounded-xl font-bold text-sm hover:bg-[#15803d] disabled:opacity-50 mt-2">
             {loading ? "Logging in..." : "Login to Admin Panel →"}
           </button>
+          {import.meta.env.DEV && (
+            <button type="button" onClick={() => { login({ email: "demo@nagnail.lk" }, "demo-token"); navigate("/dropship-orders"); }}
+              className="w-full mt-2 bg-gray-700 text-gray-300 py-2.5 rounded-xl font-bold text-xs hover:bg-gray-600">
+              🎭 Demo Login → Dropship Orders (sandbox preview)
+            </button>
+          )}
         </form>
       </div>
     </div>
