@@ -80,14 +80,14 @@ app.get("/api/admin/erp/dashboard/real-profit", adminAuth, async (req, res) => {
 
     // ---- 8. Trends (30 days) ----
     const [webRevTrend] = await db.query("SELECT DATE(created_at) as date, COALESCE(SUM(total_amount),0) as web FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND status != 'cancelled' GROUP BY DATE(created_at)");
-    const [dropRevTrend] = await db.query("SELECT DATE(created_at) as date, COALESCE(SUM(selling_price * quantity),0) as drop FROM dropship_orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND status != 'cancelled' GROUP BY DATE(created_at)");
+    const [dropRevTrend] = await db.query("SELECT DATE(created_at) as date, COALESCE(SUM(selling_price * quantity),0) as drop_rev FROM dropship_orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND status != 'cancelled' GROUP BY DATE(created_at)");
     const [webProfitTrend] = await db.query(`
       SELECT DATE(o.created_at) as date, COALESCE(SUM(oi.quantity * (oi.unit_price - ${costOf("oi.product_id")})) - SUM(COALESCE(oi.seller_earning,0)),0) as web
       FROM order_items oi JOIN orders o ON oi.order_id = o.id JOIN products p ON oi.product_id = p.id
       WHERE o.status = 'delivered' AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(o.created_at)
     `);
     const [dropProfitTrend] = await db.query(`
-      SELECT DATE(o.created_at) as date, COALESCE(SUM(o.quantity * (o.base_price - ${costOf("o.product_id")})),0) as drop
+      SELECT DATE(o.created_at) as date, COALESCE(SUM(o.quantity * (o.base_price - ${costOf("o.product_id")})),0) as drop_p
       FROM dropship_orders o JOIN products p ON o.product_id = p.id
       WHERE o.status = 'delivered' AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(o.created_at)
     `);
@@ -96,8 +96,8 @@ app.get("/api/admin/erp/dashboard/real-profit", adminAuth, async (req, res) => {
       [...a, ...b].forEach((r) => { const d = new Date(r.date).toISOString().slice(0,10); map[d] = map[d] || { date: d }; Object.assign(map[d], r, { date: d }); });
       return Object.values(map).sort((x, y) => x.date.localeCompare(y.date)).map((r) => { keys.forEach((k) => { r[k] = parseFloat(r[k] || 0); }); return r; });
     };
-    const revenue_trend = mergeTrend(webRevTrend, dropRevTrend, ["web", "drop"]).map((r) => ({ ...r, total: r.web + r.drop }));
-    const profit_trend = mergeTrend(webProfitTrend, dropProfitTrend, ["web", "drop"]).map((r) => ({ ...r, net: r.web + r.drop }));
+    const revenue_trend = mergeTrend(webRevTrend, dropRevTrend.map((r) => ({ date: r.date, drop: r.drop_rev })), ["web", "drop"]).map((r) => ({ ...r, total: r.web + r.drop }));
+    const profit_trend = mergeTrend(webProfitTrend, dropProfitTrend.map((r) => ({ date: r.date, drop: r.drop_p })), ["web", "drop"]).map((r) => ({ ...r, net: r.web + r.drop }));
 
     // ---- 9. Statuses + customers chart ----
     const [order_status] = await db.query("SELECT status, COUNT(*) as count FROM orders GROUP BY status");
