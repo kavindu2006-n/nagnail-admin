@@ -19,16 +19,20 @@ app.get("/api/admin/erp/dashboard/real-profit", adminAuth, async (req, res) => {
     const [[dropMonthSell]] = await db.query("SELECT COALESCE(SUM(selling_price * quantity),0) as val FROM dropship_orders WHERE MONTH(created_at)=MONTH(NOW()) AND YEAR(created_at)=YEAR(NOW()) AND status != 'cancelled'");
     const [[dropMonthBase]] = await db.query("SELECT COALESCE(SUM(base_price * quantity),0) as val FROM dropship_orders WHERE MONTH(created_at)=MONTH(NOW()) AND YEAR(created_at)=YEAR(NOW()) AND status != 'cancelled'");
 
-    // ---- 3. REAL PROFIT — WEBSITE (delivered orders this month, own stock) ----
+    // ---- 3. REAL PROFIT — WEBSITE (delivered orders this month) ----
+    // Seller-aware: own items (seller_id NULL) = unit - landed cost;
+    // seller items = commission only (unit - seller_earning, no COGS).
+    // Manual orders write seller_earning = full line even for own items — ignored via CASE.
     const [[webP]] = await db.query(`
       SELECT
         COALESCE(SUM(oi.quantity * oi.unit_price),0) as revenue,
-        COALESCE(SUM(oi.quantity * ${costOf("oi.product_id")}),0) as product_cost,
-        COALESCE(SUM(COALESCE(oi.seller_earning,0)),0) as seller_commission
+        COALESCE(SUM(CASE WHEN oi.seller_id IS NULL THEN oi.quantity * ${costOf("oi.product_id")} ELSE 0 END),0) as product_cost,
+        COALESCE(SUM(CASE WHEN oi.seller_id IS NOT NULL THEN COALESCE(oi.seller_earning,0) ELSE 0 END),0) as seller_commission
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       JOIN products p ON oi.product_id = p.id
       WHERE o.status = 'delivered' AND MONTH(o.created_at) = MONTH(NOW()) AND YEAR(o.created_at) = YEAR(NOW())
+        AND COALESCE(oi.item_status,'') NOT IN ('cancelled','returned')
     `);
     const webProfit = parseFloat(webP.revenue) - parseFloat(webP.product_cost) - parseFloat(webP.seller_commission);
 
@@ -46,9 +50,10 @@ app.get("/api/admin/erp/dashboard/real-profit", adminAuth, async (req, res) => {
 
     // ---- 5. Today's real profit ----
     const [[webPToday]] = await db.query(`
-      SELECT COALESCE(SUM(oi.quantity * (oi.unit_price - ${costOf("oi.product_id")})) - SUM(COALESCE(oi.seller_earning,0)),0) as profit
+      SELECT COALESCE(SUM(oi.quantity * (oi.unit_price - CASE WHEN oi.seller_id IS NULL THEN ${costOf("oi.product_id")} ELSE 0 END) - CASE WHEN oi.seller_id IS NOT NULL THEN COALESCE(oi.seller_earning,0) ELSE 0 END),0) as profit
       FROM order_items oi JOIN orders o ON oi.order_id = o.id JOIN products p ON oi.product_id = p.id
       WHERE o.status = 'delivered' AND DATE(o.created_at) = CURDATE()
+        AND COALESCE(oi.item_status,'') NOT IN ('cancelled','returned')
     `);
     const [[dropPToday]] = await db.query(`
       SELECT COALESCE(SUM(o.quantity * (o.base_price - ${costOf("o.product_id")})),0) as profit
@@ -82,9 +87,10 @@ app.get("/api/admin/erp/dashboard/real-profit", adminAuth, async (req, res) => {
     const [webRevTrend] = await db.query("SELECT DATE(created_at) as date, COALESCE(SUM(total_amount),0) as web FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND status != 'cancelled' GROUP BY DATE(created_at)");
     const [dropRevTrend] = await db.query("SELECT DATE(created_at) as date, COALESCE(SUM(selling_price * quantity),0) as drop_rev FROM dropship_orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND status != 'cancelled' GROUP BY DATE(created_at)");
     const [webProfitTrend] = await db.query(`
-      SELECT DATE(o.created_at) as date, COALESCE(SUM(oi.quantity * (oi.unit_price - ${costOf("oi.product_id")})) - SUM(COALESCE(oi.seller_earning,0)),0) as web
+      SELECT DATE(o.created_at) as date, COALESCE(SUM(oi.quantity * (oi.unit_price - CASE WHEN oi.seller_id IS NULL THEN ${costOf("oi.product_id")} ELSE 0 END) - CASE WHEN oi.seller_id IS NOT NULL THEN COALESCE(oi.seller_earning,0) ELSE 0 END),0) as web
       FROM order_items oi JOIN orders o ON oi.order_id = o.id JOIN products p ON oi.product_id = p.id
-      WHERE o.status = 'delivered' AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(o.created_at)
+      WHERE o.status = 'delivered' AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        AND COALESCE(oi.item_status,'') NOT IN ('cancelled','returned') GROUP BY DATE(o.created_at)
     `);
     const [dropProfitTrend] = await db.query(`
       SELECT DATE(o.created_at) as date, COALESCE(SUM(o.quantity * (o.base_price - ${costOf("o.product_id")})),0) as drop_p
@@ -107,9 +113,10 @@ app.get("/api/admin/erp/dashboard/real-profit", adminAuth, async (req, res) => {
     // ---- 10. Top lists ----
     const [top_products] = await db.query(`
       SELECT p.name, SUM(oi.quantity) as sold, SUM(oi.quantity * oi.unit_price) as revenue,
-        SUM(oi.quantity * (oi.unit_price - ${costOf("oi.product_id")})) as profit
+        SUM(oi.quantity * (oi.unit_price - CASE WHEN oi.seller_id IS NULL THEN ${costOf("oi.product_id")} ELSE 0 END) - CASE WHEN oi.seller_id IS NOT NULL THEN COALESCE(oi.seller_earning,0) ELSE 0 END) as profit
       FROM order_items oi JOIN orders o ON oi.order_id = o.id JOIN products p ON oi.product_id = p.id
       WHERE o.status = 'delivered' AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        AND COALESCE(oi.item_status,'') NOT IN ('cancelled','returned')
       GROUP BY p.id ORDER BY profit DESC LIMIT 5
     `);
     const [top_dropshippers] = await db.query(`
