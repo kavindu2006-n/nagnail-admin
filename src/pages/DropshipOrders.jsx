@@ -177,6 +177,33 @@ export default function DropshipOrders() {
     }
   };
 
+  const deleteOrder = async (id, orderNumber) => {
+    if (!window.confirm(`Delete order ${orderNumber || id} PERMANENTLY?\n\nFake/junk orders only - this cannot be undone.`)) return;
+    try {
+      const res = await API.delete(`/dropship-orders/${id}`);
+      if (res.data.success) {
+        showMsg(res.data.message || `Order ${orderNumber || id} deleted permanently 🗑️`);
+        setOrders((prev) => prev.filter((o) => o.id !== id));
+        setSelected((prev) => prev.filter((x) => x !== id));
+        if (selectedOrder?.id === id) setSelectedOrder(null);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || "Delete failed");
+    }
+  };
+
+  const bulkDelete = async () => {
+    if (!selected.length) return;
+    if (!window.confirm(`Delete ${selected.length} selected order(s) PERMANENTLY?\n\nFake/junk orders only. Delivered orders will be skipped. This cannot be undone.`)) return;
+    const results = await Promise.allSettled(selected.map((id) => API.delete(`/dropship-orders/${id}`)));
+    const ok = results.filter((r) => r.status === "fulfilled" && r.value?.data?.success).length;
+    const fail = selected.length - ok;
+    showMsg(`🗑️ Deleted ${ok} order(s)${fail ? ` · ${fail} skipped (delivered/protected)` : ""}`);
+    setSelected([]);
+    fetchOrders();
+  };
+
   const toggleSelect = (id) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const toggleAll = () => setSelected(selected.length === filtered.length ? [] : filtered.map((o) => o.id));
 
@@ -249,6 +276,9 @@ export default function DropshipOrders() {
                   {s}
                 </button>
               ))}
+              <button onClick={bulkDelete}
+                className="px-3 py-1 rounded-lg text-xs font-bold text-white bg-red-700 hover:bg-red-800 border border-red-900"
+                title="Permanently delete selected orders (fake/junk only)">🗑️ Delete</button>
             </div>
           </div>
         )}
@@ -385,6 +415,15 @@ export default function DropshipOrders() {
                                     {s === "cancelled" ? "✕ Cancel" : `→ ${s}`}
                                   </button>
                                 ))}
+                                {order.status !== "delivered" && (
+                                  <>
+                                    <div className="border-t border-gray-100 my-1"></div>
+                                    <button onClick={() => { setMenuId(null); deleteOrder(order.id, order.order_number); }}
+                                      className="block w-full text-left px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50">
+                                      🗑️ Delete permanently
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </>
                           )}
@@ -518,6 +557,15 @@ export default function DropshipOrders() {
                       ))}
                     </div>
                   </div>
+
+                  {selectedOrder.status !== "delivered" && (
+                    <div className="border-t border-gray-100 pt-3">
+                      <button onClick={() => deleteOrder(selectedOrder.id, selectedOrder.order_number)}
+                        className="w-full px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-all">
+                        🗑️ Delete this order permanently (fake/junk orders only)
+                      </button>
+                    </div>
+                  )}
                 </div>
               </>
             )}
