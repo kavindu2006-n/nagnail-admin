@@ -7,6 +7,9 @@ export default function Dropshippers() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [msg, setMsg] = useState("");
+  const [errMsg, setErrMsg] = useState("");
+  const [delConfirm, setDelConfirm] = useState(null);
+  const [delBusy, setDelBusy] = useState(false);
 
   useEffect(() => { fetchDropshippers(); }, []);
 
@@ -36,6 +39,25 @@ export default function Dropshippers() {
     } catch (err) { console.error(err); }
   };
 
+  const deleteDropshipper = async (id) => {
+    try {
+      setDelBusy(true);
+      const res = await API.delete(`/dropshippers/${id}`);
+      if (res.data.success) {
+        setErrMsg("");
+        setMsg(res.data.message || "Dropshipper deleted permanently");
+        setDelConfirm(null);
+        fetchDropshippers();
+        setTimeout(() => setMsg(""), 5000);
+      }
+    } catch (err) {
+      setMsg("");
+      setErrMsg(err.response?.data?.error || "Delete failed");
+      setDelConfirm(null);
+      setTimeout(() => setErrMsg(""), 6000);
+    } finally { setDelBusy(false); }
+  };
+
   const statuses = ["all", "pending", "approved", "rejected", "suspended"];
   const statusColors = {
     pending: "bg-yellow-100 text-yellow-700",
@@ -54,6 +76,7 @@ export default function Dropshippers() {
       </div>
 
       {msg && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl mb-4 text-sm">✅ {msg}</div>}
+      {errMsg && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4 text-sm">⚠️ {errMsg}</div>}
 
       <div className="flex gap-2 flex-wrap mb-6">
         {statuses.map((s) => (
@@ -134,6 +157,25 @@ export default function Dropshippers() {
                   <option value="gold">🥇 Gold</option>
                   <option value="platinum">💎 Platinum</option>
                 </select>
+
+                {delConfirm === d.id ? (
+                  <div className="ml-auto flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-red-500">Delete permanently? They can register again.</span>
+                    <button disabled={delBusy} onClick={() => deleteDropshipper(d.id)}
+                      className="bg-red-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-600 disabled:opacity-50">
+                      {delBusy ? "Deleting..." : "Yes, delete"}
+                    </button>
+                    <button onClick={() => setDelConfirm(null)}
+                      className="bg-gray-100 text-gray-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-gray-200">
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setDelConfirm(d.id); setMsg(""); setErrMsg(""); }}
+                    className="ml-auto bg-white border-2 border-red-200 text-red-500 px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-50 hover:border-red-400 transition-all">
+                    🗑️ Delete
+                  </button>
+                )}
               </div>
             </div>
           ))}
