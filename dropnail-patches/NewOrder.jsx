@@ -126,10 +126,19 @@ export default function NewOrder() {
     const t = setTimeout(async () => {
       setDelivery({ loading: true, cost: null, free: false });
       try {
-        const res = await API.post("https://nagnail.lk/api/delivery/estimate", { city, subtotal });
+        // NN-DELIVERY fix: plain fetch on purpose - the portal axios instance
+        // attaches the auth token and its response interceptor logs the user
+        // out on API errors. The public estimate endpoint needs neither.
+        const r = await fetch("https://nagnail.lk/api/delivery/estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ city, subtotal }),
+        });
         if (dead) return;
-        const cost = Math.max(0, Math.round((parseFloat(res.data && res.data.cost) || 0) * 100) / 100);
-        setDelivery({ loading: false, cost, free: cost === 0 || !!(res.data && res.data.free_shipping) });
+        if (!r.ok) throw new Error("estimate " + r.status);
+        const data = await r.json();
+        const cost = Math.max(0, Math.round((parseFloat(data && data.cost) || 0) * 100) / 100);
+        setDelivery({ loading: false, cost, free: cost === 0 || !!(data && data.free_shipping) });
       } catch {
         if (!dead) setDelivery({ loading: false, cost: null, free: false });
       }
