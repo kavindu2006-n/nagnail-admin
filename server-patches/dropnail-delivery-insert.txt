@@ -1,0 +1,2 @@
+    const nnDlv = Math.max(0, Math.min(100000, Math.round((parseFloat(req.body.delivery_charge) || 0) * 100) / 100)); // NN-DELIVERY separate field (never in profit)
+    if (nnDlv > 0) await db.query("UPDATE dropship_orders SET delivery_charge = ? WHERE id = ?", [nnDlv, result.insertId]); // NN-DELIVERY

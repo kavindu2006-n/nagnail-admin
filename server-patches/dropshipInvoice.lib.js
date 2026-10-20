@@ -22,6 +22,8 @@ function buildCustomerInvoicePDF(order, brand) {
   var qty = parseInt(order.quantity) || 1;
   var unit = parseFloat(order.selling_price) || 0;
   var total = Math.round(unit * qty * 100) / 100;
+  var dlv = Math.max(0, parseFloat(order.delivery_charge) || 0); // NN-DELIVERY separate field
+  var grand = Math.round((total + dlv) * 100) / 100; // NN-DELIVERY customer total
   function fmt(n) {
     return "Rs. " + Number(n || 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -138,13 +140,13 @@ function buildCustomerInvoicePDF(order, brand) {
   doc.font("Helvetica").fontSize(10).fillColor(INK).text(fmt(total), VAL_X, y, { width: VAL_W, align: "right", lineBreak: false });
   y += 17;
   doc.font("Helvetica").fontSize(10).fillColor(SOFT).text("Delivery", LBL_X, y, { lineBreak: false });
-  doc.font("Helvetica-Bold").fontSize(10).fillColor(GREEN).text("FREE", VAL_X, y, { width: VAL_W, align: "right", lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(10).fillColor(dlv > 0 ? INK : GREEN).text(dlv > 0 ? fmt(dlv) : "FREE", VAL_X, y, { width: VAL_W, align: "right", lineBreak: false });
   y += 24;
 
   doc.rect(RIGHT - 300, y, 300, 34).fill(DARK);
   doc.font("Helvetica-Bold").fontSize(12).fillColor("#ffffff");
   doc.text("TOTAL", RIGHT - 286, y + 11, { lineBreak: false });
-  doc.text(fmt(total), VAL_X, y + 11, { width: VAL_W, align: "right", lineBreak: false });
+  doc.text(fmt(grand), VAL_X, y + 11, { width: VAL_W, align: "right", lineBreak: false });
   y += 34 + 26;
 
   // ---------- payment ----------

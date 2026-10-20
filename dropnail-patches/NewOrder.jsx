@@ -18,6 +18,7 @@ import {
   ShoppingBag,
   Sparkles,
   AlertTriangle,
+  Truck,
   X
 } from "lucide-react";
 
@@ -44,6 +45,7 @@ export default function NewOrder() {
   const [activeImg, setActiveImg] = useState(null);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [groupWith, setGroupWith] = useState(null); // NN-DS-B
+  const [delivery, setDelivery] = useState({ loading: false, cost: null, free: false }); // NN-DELIVERY
 
   useEffect(() => {
     fetchProducts();
@@ -110,6 +112,31 @@ export default function NewOrder() {
   const profit = (sell - basePrice) * qtyNum; // NN-QTY total profit
   const suggested = suggestedPrice(basePrice);
 
+  // NN-DELIVERY: live delivery charge from the existing main-site zone config (DELIVERY_ZONES)
+  const dlvCharge = groupWith ? 0 : (typeof delivery.cost === "number" ? delivery.cost : 0); // parcel adds: delivery already charged on first item
+  useEffect(() => {
+    const city = (customer.city || "").trim();
+    const subtotal = sell * qtyNum;
+    if (step === 4) return; // keep the values used at placement for the success screen
+    if (step !== 3 || groupWith || !(sell > 0) || city.length < 3) {
+      setDelivery((d) => (d.cost === null && !d.loading ? d : { loading: false, cost: null, free: false }));
+      return;
+    }
+    let dead = false;
+    const t = setTimeout(async () => {
+      setDelivery({ loading: true, cost: null, free: false });
+      try {
+        const res = await API.post("https://nagnail.lk/api/delivery/estimate", { city, subtotal });
+        if (dead) return;
+        const cost = Math.max(0, Math.round((parseFloat(res.data && res.data.cost) || 0) * 100) / 100);
+        setDelivery({ loading: false, cost, free: cost === 0 || !!(res.data && res.data.free_shipping) });
+      } catch {
+        if (!dead) setDelivery({ loading: false, cost: null, free: false });
+      }
+    }, 500);
+    return () => { dead = true; clearTimeout(t); };
+  }, [step, groupWith, customer.city, sell, qtyNum]);
+
   const handlePlace = async () => {
     if (!customer.name || !customer.phone || !customer.address || !customer.city) {
       return alert("Please fill all required customer details");
@@ -127,6 +154,7 @@ export default function NewOrder() {
         quantity: qtyNum, // NN-QTY
         selling_price: sell,
         customer_price: sell,
+        delivery_charge: dlvCharge, // NN-DELIVERY separate field, never in profit
         group_with: groupWith,
         selected_variants: Object.keys(selectedVariants).length > 0 ? selectedVariants : null,
         customer_name: customer.name,
@@ -181,6 +209,8 @@ export default function NewOrder() {
               { label: "Quantity", value: "×" + qtyNum }, // NN-QTY
               { label: "Your Cost (per item)", value: `LKR ${fmt(basePrice)}` },
               { label: "Selling Price (per item)", value: `LKR ${fmt(sell)}` },
+              { label: "Delivery Charge", value: groupWith ? "පළමු item එකෙන් අය කරලා" : typeof delivery.cost === "number" ? (delivery.cost > 0 ? `LKR ${fmt(delivery.cost)}` : "FREE 🎉") : "— (පසුව ගණනය වේ)" }, // NN-DELIVERY
+              { label: "Customer Pays (COD)", value: `LKR ${fmt(sell * qtyNum + dlvCharge)}`, highlight: true }, // NN-DELIVERY
               {
                 label: qtyNum > 1 ? `Your Profit (${qtyNum} items)` : "Your Profit",
                 value: `+ LKR ${fmt(profit)}`,
@@ -456,11 +486,17 @@ export default function NewOrder() {
 
             {/* Selling Price + Quantity */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <p className="font-bold text-slate-800 text-sm mb-1 flex items-center gap-2">
+              <p className="font-bold text-slate-800 text-sm mb-2 flex items-center gap-2">
                 <Calculator className="w-4 h-4 text-indigo-600" /> Set Selling Price
               </p>
+              <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-2.5 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                <p className="text-xs font-bold text-amber-800 leading-relaxed">
+                  මෙතැනට භාණ්ඩයේ මිල පමණක් ඇතුළත් කරන්න. Delivery Charge එක එකතු කරන්න එපා.
+                </p>
+              </div>
               <p className="text-xs text-slate-400 mb-4">
-                What will your customer pay? (Must be above LKR {fmt(basePrice)})
+                මිල ඔයාගේ cost එකට වඩා වැඩි විය යුතුයි (Your cost: LKR {fmt(basePrice)})
               </p>
               <div className="relative mb-4">
                 <span className="absolute left-3.5 top-3 text-xs font-bold text-slate-400">LKR</span>
@@ -468,7 +504,7 @@ export default function NewOrder() {
                   type="number"
                   value={sellingPrice}
                   onChange={(e) => setSellingPrice(e.target.value)}
-                  placeholder={`Suggested: ${fmt(suggested)}`}
+                  placeholder="භාණ්ඩයේ විකුණුම් මිල ඇතුළත් කරන්න"
                   min={basePrice + 1}
                   step={50}
                   className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-bold"
@@ -522,33 +558,50 @@ export default function NewOrder() {
               </div>
 
               {sell > 0 && (
-                <div
-                  className={`rounded-xl p-4 text-center border ${
-                    profit > 0
-                      ? "bg-emerald-50 border-emerald-200"
-                      : "bg-rose-50 border-rose-200"
-                  }`}
-                >
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
-                    Your Profit
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 overflow-hidden">
+                  <p className="px-4 pt-3 pb-2 text-xs font-extrabold text-slate-500 uppercase tracking-wider">
+                    🧾 Customer Price Summary
                   </p>
-                  <p
-                    className={`text-2xl font-extrabold font-mono ${
-                      profit > 0 ? "text-emerald-600" : "text-rose-600"
-                    }`}
-                  >
-                    {profit > 0 ? "+" : ""}LKR {fmt(profit)}
-                  </p>
-                  {qtyNum > 1 && sell > basePrice && (
-                    <p className="text-xs text-slate-500 font-medium mt-1">
-                      LKR {fmt(sell - basePrice)} × {qtyNum} items
+                  <div className="px-4 pb-3 space-y-2">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-500 font-medium">Product Price{qtyNum > 1 ? ` (×${qtyNum})` : ""}</span>
+                      <span className="font-bold text-slate-800 font-mono">LKR {fmt(sell * qtyNum)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm gap-3">
+                      <span className="text-slate-500 font-medium">Delivery Charge</span>
+                      <span className="text-[11px] font-bold text-slate-400 text-right leading-snug">
+                        Delivery Charge එක Customer Details ඇතුළත් කළ පසු ගණනය වේ
+                      </span>
+                    </div>
+                    <div className="border-t border-dashed border-slate-200 pt-2 flex justify-between items-center">
+                      <span className="text-slate-600 font-bold text-sm">Customer Total</span>
+                      <span className="text-right">
+                        <span className="text-lg font-extrabold text-slate-900 font-mono block leading-tight">
+                          LKR {fmt(sell * qtyNum)}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">+ delivery පසුව එකතු වේ</span>
+                      </span>
+                    </div>
+                    <div className={`rounded-xl p-3 border flex justify-between items-center ${profit > 0 ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"}`}>
+                      <span className={`text-xs font-bold uppercase tracking-wider ${profit > 0 ? "text-emerald-700" : "text-rose-700"}`}>Your Profit</span>
+                      <span className={`text-xl font-extrabold font-mono ${profit > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                        {profit > 0 ? "+" : ""}LKR {fmt(profit)}
+                      </span>
+                    </div>
+                    {qtyNum > 1 && sell > basePrice && (
+                      <p className="text-xs text-slate-500 font-medium text-center">
+                        LKR {fmt(sell - basePrice)} × {qtyNum} items
+                      </p>
+                    )}
+                    {sell <= basePrice && (
+                      <p className="text-xs text-rose-500 font-medium flex items-center justify-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Price must be higher than cost
+                      </p>
+                    )}
+                    <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+                      Delivery Charge එක profit එකට එකතු වන්නේ නැහැ — profit = (මිල − cost) × qty විතරයි
                     </p>
-                  )}
-                  {sell <= basePrice && (
-                    <p className="text-xs text-rose-500 font-medium mt-1 flex items-center justify-center gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5" /> Price must be higher than cost
-                    </p>
-                  )}
+                  </div>
                 </div>
               )}
             </div>
@@ -683,6 +736,50 @@ export default function NewOrder() {
                   rows={2}
                   className="w-full px-4 py-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-medium resize-none"
                 />
+              </div>
+            </div>
+
+            {/* NN-DELIVERY: live delivery charge (city zones) + customer total */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <p className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
+                <Truck className="w-4 h-4 text-indigo-600" /> Delivery & Customer Total
+              </p>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-500 font-medium">Product Price{qtyNum > 1 ? ` (×${qtyNum})` : ""}</span>
+                  <span className="font-bold text-slate-800 font-mono">LKR {fmt(sell * qtyNum)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm gap-3">
+                  <span className="text-slate-500 font-medium">
+                    Delivery{(customer.city || "").trim() ? ` → ${(customer.city || "").trim()}` : ""}
+                  </span>
+                  {groupWith ? (
+                    <span className="text-xs font-bold text-emerald-600 text-right">පළමු item එකෙන් දැනටමත් අය කරලා ✓</span>
+                  ) : delivery.loading ? (
+                    <span className="text-xs font-bold text-indigo-500 flex items-center gap-1.5">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> ගණනය වෙමින්...
+                    </span>
+                  ) : typeof delivery.cost === "number" ? (
+                    delivery.cost > 0 ? (
+                      <span className="font-bold text-slate-800 font-mono">LKR {fmt(delivery.cost)}</span>
+                    ) : (
+                      <span className="font-bold text-emerald-600">FREE 🎉</span>
+                    )
+                  ) : (
+                    <span className="text-[11px] font-bold text-slate-400 text-right">City ඇතුළත් කරන්න</span>
+                  )}
+                </div>
+                <div className="border-t border-dashed border-slate-200 pt-2.5 flex justify-between items-center">
+                  <span className="text-slate-600 font-bold text-sm">Customer Total (COD)</span>
+                  <span className="text-xl font-extrabold text-slate-900 font-mono">
+                    {!groupWith && typeof delivery.cost === "number"
+                      ? `LKR ${fmt(sell * qtyNum + dlvCharge)}`
+                      : `LKR ${fmt(sell * qtyNum)} + delivery`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 text-center leading-relaxed pt-1">
+                  Customer ගෙවන සම්පූර්ණ මුදල (COD) · Delivery Charge එක profit එකට එකතු වන්නේ නැහැ — Your Profit: +LKR {fmt(profit)} විතරයි
+                </p>
               </div>
             </div>
 
