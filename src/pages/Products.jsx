@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import RichTextEditor from "../components/RichTextEditor";
 import SpecsEditor from "../components/SpecsEditor"; // NN-SPECS
 import API from "../api";
-import { Package, Search, Plus, Edit, Trash2, CheckCircle, XCircle, Sparkles, Image as ImageIcon, Video, Layers, Upload, Loader2, PlusCircle, X } from "lucide-react";
+import { Package, Search, Plus, Edit, Trash2, CheckCircle, XCircle, Sparkles, Image as ImageIcon, Video, Layers, Upload, Loader2, PlusCircle, X, Filter, RotateCcw, ChevronLeft, ChevronRight, Eye, Boxes, AlertTriangle, BarChart3 } from "lucide-react";
 
 export default function Products() {
   const [products, setProducts] = useState([]);
@@ -10,6 +10,25 @@ export default function Products() {
   const [brands, setBrands] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // NN-PRODUCTS-CATALOG-V4: client-side filters never alter stored product data.
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [stockFilter, setStockFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [brandFilter, setBrandFilter] = useState("all");
+  const [skuFilter, setSkuFilter] = useState("all");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
+  const resetFilters = () => {
+    setSearch(""); setSourceFilter("all"); setStatusFilter("all");
+    setStockFilter("all"); setCategoryFilter("all"); setBrandFilter("all");
+    setSkuFilter("all"); setMinPrice(""); setMaxPrice(""); setSortBy("newest"); setPage(1);
+  };
+  const changeFilter = (setter, value) => { setter(value); setPage(1); };
+
   
   const handleAutoExtractSupplierSpecs = () => {
     const raw = supplierText || formData.supplier_raw || "";
@@ -98,9 +117,120 @@ export default function Products() {
 
   const [formData, setFormData] = useState({
     name: "", name_si: "", description: "", price: "", sale_price: "", dropship_price: "", stock_qty: 0,
-    category_id: "", brand_id: "", meta_title: "", meta_description: "", is_active: 1, is_nagnail_official: 1, sku: "", warehouse_location: "",
+    category_id: "", brand_id: "", meta_title: "", meta_description: "", is_active: 1, is_nagnail_official: 1, sku: "", gtin: "", mpn: "", warehouse_location: "",
     image_url: "", gallery_urls: [], video_url: "", variants: []
   });
+
+  const [newCategory, setNewCategory] = useState(null);
+  const [categoryNotice, setCategoryNotice] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
+  const normalizeCategory = value => String(value ?? "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ").trim();
+
+  const createCategory = async () => {
+    const name = newCategory?.trim();
+    const slug = normalizeCategory(name).replace(/ /g, "-");
+    if (creatingCategory) return;
+    if (!slug) {
+      setCategoryNotice("Enter a category name in English.");
+      return;
+    }
+
+    const findExisting = list => list.find(category =>
+      normalizeCategory(category.name) === normalizeCategory(name) || category.slug === slug
+    );
+    const selectCategory = category => {
+      if (Number(category.is_active ?? 1) !== 1) {
+        setCategoryNotice("This category already exists but is inactive. Enable it in Categories.");
+        return;
+      }
+      setFormData(previous => ({ ...previous, category_id: String(category.id) }));
+      setNewCategory(null);
+      setCategoryNotice(`${category.name} selected.`);
+    };
+
+    setCreatingCategory(true);
+    setCategoryNotice("");
+    try {
+      const { data } = await API.get("/categories");
+      const latest = Array.isArray(data) ? data : data.categories;
+      if (!Array.isArray(latest)) throw new Error("Could not load categories.");
+      setCategories(latest);
+
+      const existing = findExisting(latest);
+      if (existing) {
+        selectCategory(existing);
+        return;
+      }
+
+      try {
+        const { data: created } = await API.post("/categories", { name, slug, is_active: 1 });
+        if (!created?.success || !created.id) throw new Error("Could not create the category.");
+        const category = { id: created.id, name, slug, is_active: 1 };
+        setCategories(previous => [...previous, category]);
+        selectCategory(category);
+      } catch (error) {
+        // A second admin may have created this category since the first check.
+        const { data: refreshed } = await API.get("/categories");
+        const list = Array.isArray(refreshed) ? refreshed : refreshed.categories;
+        const existing = Array.isArray(list) && findExisting(list);
+        if (!existing) throw error;
+        setCategories(list);
+        selectCategory(existing);
+      }
+    } catch (error) {
+      setCategoryNotice(error.response?.data?.error || error.message || "Could not create the category.");
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
+  const suggestCategory = (showFeedback = false) => {
+    const normalize = value => String(value ?? "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ").trim();
+    const title = normalize(formData.name);
+    const available = categories.filter(category =>
+      Number(category.is_active ?? 1) === 1 && category.id != null
+    );
+    const rules = [
+      [/\b(flat irons?|hair straighteners?|hair curlers?|curling irons?|hair dryers?|blow dryers?|hair brushes?|hairbrushes)\b/, ["Hair Care"]],
+      [/\b(electric grinders?|blenders?|mixer grinders?)\b/, ["Electric Grinders & Blenders", "Kitchen Appliances", "Kitchen Accessories"]],
+      [/\bpower\s?banks?\b/, ["Power Banks", "Power Bank", "Powerbanks", "Powerbank"]],
+      [/\b(bluetooth speakers?|wireless speakers?)\b/, ["Bluetooth Speakers", "Speakers"]],
+      [/\bspeakers?\b/, ["Speakers", "Bluetooth Speakers"]],
+      [/\b(laptop battery|notebook battery)\b/, ["Laptop Battery", "Laptop Batteries"]],
+      [/\b(laptop charger|laptop adapter|notebook charger)\b/, ["Laptop Chargers", "Laptop Adapters"]],
+      [/\b(laptop keyboard|notebook keyboard)\b/, ["Laptop Keyboards", "Laptop Keyboard"]],
+      [/\b(laptop screen|notebook screen)\b/, ["Laptop Screens", "Laptop Screen"]],
+      [/\b(kettle|rice cooker|blender|grinder|air fryer|toaster)\b/, ["Kitchen Appliances", "Kitchen Gadgets", "Kitchen Accessories"]],
+      [/\b(earbuds?|ear buds?|earphones?|headphones?|headsets?)\b/, ["Headphones & Earphones", "Headphones & Headset", "Earphones"]],
+      [/\b(printers?|inkjet|ecotank)\b/, ["Printers", "Printer"]],
+    ];
+
+    const rule = rules.find(([pattern]) => pattern.test(title));
+    const preferred = rule?.[1].map(normalize) ?? [];
+    const knownMatch = preferred
+      .map(name => available.find(category => normalize(category.name) === name))
+      .find(Boolean);
+
+    const titleMatches = available.filter(category => {
+      const name = normalize(category.name);
+      return name.includes(" ") && (` ${title} `).includes(` ${name} `);
+    });
+    const category = knownMatch || (titleMatches.length === 1 ? titleMatches[0] : null);
+
+    if (category) {
+      setFormData(previous => ({ ...previous, category_id: String(category.id) }));
+      setNewCategory(null);
+      setCategoryNotice(`${category.name} selected.`);
+    } else if (title) {
+      setNewCategory(rule?.[1][0] ?? "");
+      setCategoryNotice("Choose an existing category or add a new one.");
+    } else if (showFeedback) {
+      setCategoryNotice("Enter the English product title first.");
+    }
+  };
 
   const getFullImageUrl = (url) => {
     if (!url || url === "null" || url === "undefined") return "";
@@ -144,22 +274,24 @@ export default function Products() {
       setFormData({
         name: product.name || "", name_si: product.name_si || "", description: product.description || "",
         price: product.price ?? "", sale_price: product.sale_price ?? "", dropship_price: product.dropship_price ?? "",
-        stock_qty: product.stock_qty || 0, category_id: product.category_id || (categories[0]?.id || ""),
+        stock_qty: product.stock_qty || 0, category_id: String(product.category_id || ""),
         brand_id: product.brand_id ?? "",
         meta_title: product.meta_title || "",
         meta_description: product.meta_description || "",
         is_active: product.is_active ?? 1, is_nagnail_official: product.is_nagnail_official ?? 1,
-        sku: product.sku || "", warehouse_location: product.warehouse_location || "",
+        sku: product.sku || "", gtin: product.gtin || "", mpn: product.mpn || "", warehouse_location: product.warehouse_location || "",
         image_url: product.image_url || "", gallery_urls: gallery, video_url: product.video_url || "", variants: parsedVariants
       });
     } else {
       setEditingId(null);
       setFormData({
         name: "", name_si: "", description: "", price: "", sale_price: "", dropship_price: "", stock_qty: 0,
-        category_id: categories[0]?.id || "", brand_id: "", meta_title: "", meta_description: "", is_active: 1, is_nagnail_official: 1, sku: "", warehouse_location: "",
+        category_id: "", brand_id: "", meta_title: "", meta_description: "", is_active: 1, is_nagnail_official: 1, sku: "", gtin: "", mpn: "", warehouse_location: "",
         image_url: "", gallery_urls: [], video_url: "", variants: []
       });
     }
+    setNewCategory(null);
+    setCategoryNotice("");
     setModalOpen(true);
   };
 
@@ -373,68 +505,117 @@ export default function Products() {
     try { await API.delete(`/products/${id}`); fetchData(); } catch (e) { alert("Failed to delete product."); }
   };
 
-  const filtered = products.filter(p => p.name?.toLowerCase().includes(search.toLowerCase()) || p.sku?.toLowerCase().includes(search.toLowerCase()));
+  const normalizedSearch = search.trim().toLowerCase();
+  const filtered = products.filter((p) => {
+    const name = String(p.name || "").toLowerCase();
+    const sku = String(p.sku || "").toLowerCase();
+    const id = String(p.id || "");
+    const stock = Number(p.stock_qty) || 0;
+    const price = Number(p.price) || 0;
+    if (normalizedSearch && !name.includes(normalizedSearch) && !sku.includes(normalizedSearch) && !id.includes(normalizedSearch)) return false;
+    if (sourceFilter === "warehouse" && Number(p.is_nagnail_official) !== 1) return false;
+    if (sourceFilter === "dropship" && Number(p.is_nagnail_official) !== 0) return false;
+    if (statusFilter === "active" && Number(p.is_active) !== 1) return false;
+    if (statusFilter === "hidden" && Number(p.is_active) !== 0) return false;
+    if (stockFilter === "out" && stock > 0) return false;
+    if (stockFilter === "low" && (stock <= 0 || stock > 5)) return false;
+    if (stockFilter === "available" && stock <= 0) return false;
+    if (categoryFilter !== "all" && String(p.category_id ?? "") !== categoryFilter) return false;
+    if (brandFilter !== "all" && String(p.brand_id ?? "") !== brandFilter) return false;
+    if (skuFilter === "missing" && String(p.sku || "").trim()) return false;
+    if (skuFilter === "present" && !String(p.sku || "").trim()) return false;
+    if (minPrice !== "" && Number.isFinite(Number(minPrice)) && price < Number(minPrice)) return false;
+    if (maxPrice !== "" && Number.isFinite(Number(maxPrice)) && price > Number(maxPrice)) return false;
+    return true;
+  }).sort((a, b) => {
+    if (sortBy === "name") return String(a.name || "").localeCompare(String(b.name || ""));
+    if (sortBy === "priceLow") return (Number(a.price) || 0) - (Number(b.price) || 0);
+    if (sortBy === "priceHigh") return (Number(b.price) || 0) - (Number(a.price) || 0);
+    if (sortBy === "stockLow") return (Number(a.stock_qty) || 0) - (Number(b.stock_qty) || 0);
+    if (sortBy === "stockHigh") return (Number(b.stock_qty) || 0) - (Number(a.stock_qty) || 0);
+    const diff = (Number(b.id) || 0) - (Number(a.id) || 0);
+    return sortBy === "oldest" ? -diff : diff;
+  });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleProducts = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const countActive = products.filter(p => Number(p.is_active) === 1).length;
+  const countLow = products.filter(p => Number(p.stock_qty) > 0 && Number(p.stock_qty) <= 5).length;
+  const countOut = products.filter(p => (Number(p.stock_qty) || 0) <= 0).length;
+  const countNoSku = products.filter(p => !String(p.sku || "").trim()).length;
+  const money = (value) => `LKR ${(Number(value) || 0).toLocaleString("en-LK")}`;
+  const controlClass = "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+  const activeFilterCount = [sourceFilter, statusFilter, stockFilter, categoryFilter, brandFilter, skuFilter].filter(v => v !== "all").length + Number(Boolean(search.trim())) + Number(minPrice !== "") + Number(maxPrice !== "");
+
+  const ProductActions = ({ product }) => (
+    <div className="flex items-center gap-1.5">
+      <button type="button" onClick={() => openModal(product)} aria-label={`Edit ${product.name}`} title="Edit product" className="rounded-xl border border-indigo-100 bg-indigo-50 p-2.5 text-indigo-600 transition hover:bg-indigo-100"><Edit className="h-4 w-4" /></button>
+      <button type="button" onClick={() => handleDelete(product.id)} aria-label={`Delete ${product.name}`} title="Delete product" className="rounded-xl border border-rose-100 bg-rose-50 p-2.5 text-rose-600 transition hover:bg-rose-100"><Trash2 className="h-4 w-4" /></button>
+    </div>
+  );
 
   return (
-    <div className="p-6 bg-slate-50 min-h-screen">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Package className="w-7 h-7 text-indigo-600" /> Products Catalog</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Manage warehouse inventory, dropship items, and ERP tracking</p>
+    <div className="min-h-full min-w-0 bg-slate-50 px-4 py-6 sm:px-6 lg:px-8 space-y-6">
+      <div className="rounded-3xl border border-slate-200 bg-white px-5 py-6 shadow-sm sm:px-8 sm:py-8">
+        <div className="flex flex-wrap items-center justify-between gap-5">
+          <div className="min-w-0">
+            <p className="mb-2 text-xs font-extrabold uppercase tracking-[.18em] text-indigo-600">● NAGNAIL / INVENTORY</p>
+            <h1 className="flex items-center gap-3 text-2xl font-extrabold tracking-tight text-slate-950 sm:text-3xl"><Package className="h-7 w-7 shrink-0 text-indigo-600" /> Products Catalog</h1>
+            <p className="mt-2 text-sm text-slate-500">Manage warehouse and dropship products, inventory, pricing and SEO.</p>
+          </div>
+          <button type="button" onClick={() => openModal()} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700"><Plus className="h-4 w-4" /> Add New Product</button>
         </div>
-        <button onClick={() => openModal()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition shadow-sm"><Plus className="w-4 h-4" /> Add New Product</button>
       </div>
 
-      <div className="bg-white p-4 rounded-xl border border-slate-200 mb-6 flex justify-between items-center shadow-sm">
-        <div className="relative w-96">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-          <input type="text" placeholder="Search products by name or SKU..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50" />
-        </div>
-        <div className="text-sm text-slate-500">Total Products: <span className="font-bold text-slate-800">{filtered.length}</span></div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { label: "Total Products", count: products.length, icon: Package, shade: "text-indigo-600", click: resetFilters },
+          { label: "Active", count: countActive, icon: CheckCircle, shade: "text-emerald-600", click: () => changeFilter(setStatusFilter, "active") },
+          { label: "Low Stock (1–5)", count: countLow, icon: AlertTriangle, shade: "text-amber-600", click: () => changeFilter(setStockFilter, "low") },
+          { label: "Out of Stock", count: countOut, icon: XCircle, shade: "text-rose-600", click: () => changeFilter(setStockFilter, "out") }
+        ].map(item => <button key={item.label} type="button" onClick={item.click} className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-indigo-200 hover:shadow-md sm:p-5">
+          <div className="mb-3 flex items-center justify-between gap-2"><span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.label}</span><item.icon className={`h-5 w-5 shrink-0 ${item.shade}`} /></div>
+          <div className="text-2xl font-extrabold tabular-nums text-slate-950 sm:text-3xl">{loading ? "—" : item.count}</div>
+        </button>)}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-100 text-slate-600 text-xs font-semibold uppercase tracking-wider border-b border-slate-200">
-              <th className="p-4">Product Info</th><th className="p-4">Source & Bin</th><th className="p-4">Pricing</th><th className="p-4">Stock</th><th className="p-4">Status</th><th className="p-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-sm">
-            {loading ? <tr><td colSpan="6" className="p-8 text-center text-slate-400">Loading products...</td></tr> : filtered.length === 0 ? <tr><td colSpan="6" className="p-8 text-center text-slate-400">No products found.</td></tr> : filtered.map(p => (
-              <tr key={p.id} className="hover:bg-slate-50 transition">
-                <td className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
-                      {p.image_url ? <img src={getFullImageUrl(p.image_url)} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-5 h-5 text-slate-400" />}
-                    </div>
-                    <div>
-                      <div className="font-semibold text-slate-800 line-clamp-1">{p.name}</div>
-                      <div className="text-xs text-slate-500 font-mono mt-0.5">SKU: {p.sku || <span className="text-slate-300">N/A</span>}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="p-4">
-                  <div className={`inline-flex px-2 py-0.5 text-[10px] font-bold uppercase rounded-full mb-1 ${p.is_nagnail_official ? "bg-indigo-100 text-indigo-700" : "bg-emerald-100 text-emerald-700"}`}>{p.is_nagnail_official ? "NagNail Warehouse" : "Dropshipping"}</div>
-                  <div className="text-xs font-mono font-bold text-amber-700 mt-1">{p.is_nagnail_official ? (p.warehouse_location ? `Bin: ${p.warehouse_location}` : "Bin: Unassigned") : ""}</div>
-                </td>
-                <td className="p-4">
-                  <div className="font-semibold text-slate-800">LKR {parseFloat(p.price || 0).toLocaleString()}</div>
-                  {p.sale_price > 0 && <div className="text-xs text-rose-500 line-through">LKR {parseFloat(p.sale_price).toLocaleString()}</div>}
-                </td>
-                <td className="p-4"><span className={`font-bold ${p.stock_qty <= 5 ? "text-rose-600" : "text-emerald-600"}`}>{p.stock_qty}</span> <span className="text-xs text-slate-500 ml-1">units</span></td>
-                <td className="p-4">
-                  {p.is_active ? <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><CheckCircle className="w-3.5 h-3.5" /> Active</span> : <span className="flex items-center gap-1 text-xs font-bold text-slate-400"><XCircle className="w-3.5 h-3.5" /> Hidden</span>}
-                </td>
-                <td className="p-4 text-right">
-                  <button onClick={() => openModal(p)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition mr-1"><Edit className="w-4 h-4" /></button>
-                  <button onClick={() => handleDelete(p.id)} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <section aria-label="Product filters" className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-sm font-extrabold text-slate-900"><Filter className="h-4 w-4 text-indigo-600" /> Smart Product Filters {activeFilterCount > 0 && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">{activeFilterCount}</span>}</h2>
+          <button type="button" onClick={resetFilters} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100"><RotateCcw className="h-3.5 w-3.5" /> Clear filters</button>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+          <label className="relative sm:col-span-2 lg:col-span-2 xl:col-span-2"><span className="sr-only">Search products</span><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400"/><input value={search} onChange={e => changeFilter(setSearch,e.target.value)} placeholder="Search name, SKU or ID..." className={`${controlClass} pl-10`} /></label>
+          <label><span className="sr-only">Product source</span><select className={controlClass} value={sourceFilter} onChange={e => changeFilter(setSourceFilter,e.target.value)}><option value="all">All sources</option><option value="warehouse">NagNail warehouse</option><option value="dropship">Dropshipping</option></select></label>
+          <label><span className="sr-only">Status</span><select className={controlClass} value={statusFilter} onChange={e => changeFilter(setStatusFilter,e.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="hidden">Hidden</option></select></label>
+          <label><span className="sr-only">Stock availability</span><select className={controlClass} value={stockFilter} onChange={e => changeFilter(setStockFilter,e.target.value)}><option value="all">All stock levels</option><option value="available">In stock</option><option value="low">Low stock (1–5)</option><option value="out">Out of stock (0)</option></select></label>
+          <label><span className="sr-only">SKU status</span><select className={controlClass} value={skuFilter} onChange={e => changeFilter(setSkuFilter,e.target.value)}><option value="all">All SKUs</option><option value="missing">SKU missing</option><option value="present">Has SKU</option></select></label>
+          <label><span className="sr-only">Category</span><select className={controlClass} value={categoryFilter} onChange={e => changeFilter(setCategoryFilter,e.target.value)}><option value="all">All categories</option>{categories.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}</select></label>
+          <label><span className="sr-only">Brand</span><select className={controlClass} value={brandFilter} onChange={e => changeFilter(setBrandFilter,e.target.value)}><option value="all">All brands</option>{brands.map(b => <option key={b.id} value={String(b.id)}>{b.name}</option>)}</select></label>
+          <label><span className="sr-only">Minimum price</span><input className={controlClass} type="number" min="0" placeholder="Min LKR" value={minPrice} onChange={e => changeFilter(setMinPrice,e.target.value)} /></label>
+          <label><span className="sr-only">Maximum price</span><input className={controlClass} type="number" min="0" placeholder="Max LKR" value={maxPrice} onChange={e => changeFilter(setMaxPrice,e.target.value)} /></label>
+          <label className="sm:col-span-2"><span className="sr-only">Sort products</span><select className={controlClass} value={sortBy} onChange={e => changeFilter(setSortBy,e.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name A–Z</option><option value="priceLow">Price: Low to High</option><option value="priceHigh">Price: High to Low</option><option value="stockLow">Stock: Low to High</option><option value="stockHigh">Stock: High to Low</option></select></label>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 text-xs text-slate-500">
+          <span>Showing <strong className="text-slate-800">{filtered.length}</strong> of <strong>{products.length}</strong> products{countNoSku > 0 ? ` · ${countNoSku} missing SKU` : ""}</span>
+          <span>Filters change this view only — saved products stay unchanged</span>
+        </div>
+      </section>
+
+      <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Product results">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 sm:px-5"><h2 className="text-sm font-extrabold text-slate-900">Product Results</h2><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{filtered.length} matched</span></div>
+        {loading ? <div className="p-12 text-center text-sm text-slate-500">Loading products...</div> : filtered.length === 0 ? <div className="p-12 text-center"><Search className="mx-auto mb-3 h-8 w-8 text-slate-300"/><p className="font-bold text-slate-800">No matching products</p><button type="button" className="mt-3 text-sm font-semibold text-indigo-600 hover:underline" onClick={resetFilters}>Clear filters</button></div> : <>
+          <div className="divide-y divide-slate-100 md:hidden">
+            {visibleProducts.map(p => <article key={p.id} className="p-4 space-y-3">
+              <div className="flex items-start gap-3"><div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">{p.image_url ? <img src={getFullImageUrl(p.image_url)} alt="" className="h-full w-full object-cover"/> : <ImageIcon className="m-4 h-7 w-7 text-slate-400" />}</div><div className="min-w-0 flex-1"><p className="line-clamp-2 text-sm font-bold text-slate-900">{p.name}</p><p className="mt-1 break-all font-mono text-[11px] text-slate-500">SKU: {p.sku || "Not set"}</p></div></div>
+              <div className="grid grid-cols-2 gap-2 text-xs"><div><p className="text-slate-400">Price</p><p className="font-bold text-slate-900">{money(p.price)}</p></div><div><p className="text-slate-400">Stock</p><p className={`font-bold ${Number(p.stock_qty) <= 5 ? "text-rose-600" : "text-emerald-600"}`}>{p.stock_qty || 0} units</p></div><div><p className="text-slate-400">Source</p><p className="font-semibold text-slate-700">{Number(p.is_nagnail_official) === 1 ? "Warehouse" : "Dropshipping"}</p></div><div><p className="text-slate-400">Status</p><p className={`font-semibold ${Number(p.is_active) === 1 ? "text-emerald-600" : "text-slate-500"}`}>{Number(p.is_active) === 1 ? "Active" : "Hidden"}</p></div></div>
+              <div className="flex items-center justify-end border-t border-slate-100 pt-2"><ProductActions product={p}/></div>
+            </article>)}
+          </div>
+          <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[790px] table-fixed text-left text-sm"><thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500"><tr><th className="w-[34%] p-4">Product info</th><th className="w-[18%] p-4">Source & Bin</th><th className="w-[14%] p-4">Price</th><th className="w-[11%] p-4">Stock</th><th className="w-[11%] p-4">Status</th><th className="w-[12%] p-4 text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-100">{visibleProducts.map(p => <tr key={p.id} className="hover:bg-slate-50"><td className="p-4"><div className="flex min-w-0 items-center gap-3"><div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">{p.image_url ? <img src={getFullImageUrl(p.image_url)} alt="" className="h-full w-full object-cover"/> : <ImageIcon className="m-3 h-6 w-6 text-slate-400" />}</div><div className="min-w-0"><p className="line-clamp-2 font-semibold leading-5 text-slate-900" title={p.name}>{p.name}</p><p className="mt-1 truncate font-mono text-[11px] text-slate-400">SKU: {p.sku || "Not set"}</p></div></div></td><td className="p-4"><span className={`inline-flex rounded-lg px-2 py-1 text-[10px] font-extrabold uppercase ${Number(p.is_nagnail_official) === 1 ? "bg-indigo-50 text-indigo-700" : "bg-emerald-50 text-emerald-700"}`}>{Number(p.is_nagnail_official) === 1 ? "Warehouse" : "Dropshipping"}</span>{Number(p.is_nagnail_official) === 1 && <p className="mt-2 truncate text-xs text-slate-500">Bin: {p.warehouse_location || "Unassigned"}</p>}</td><td className="p-4 font-bold text-slate-900">{money(p.price)}</td><td className="p-4"><span className={`font-bold ${Number(p.stock_qty) <= 5 ? "text-rose-600" : "text-emerald-600"}`}>{p.stock_qty || 0}</span><span className="ml-1 text-xs text-slate-400">units</span></td><td className="p-4"><span className={`inline-flex items-center gap-1 text-xs font-bold ${Number(p.is_active) === 1 ? "text-emerald-600" : "text-slate-400"}`}>{Number(p.is_active) === 1 ? <CheckCircle className="h-4 w-4"/> : <XCircle className="h-4 w-4"/>}{Number(p.is_active) === 1 ? "Active" : "Hidden"}</span></td><td className="p-4"><div className="flex justify-end"><ProductActions product={p}/></div></td></tr>)}</tbody></table></div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-4 text-xs text-slate-500 sm:px-5"><span>{(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} products</span><div className="flex items-center gap-2"><button type="button" disabled={currentPage <= 1} onClick={() => setPage(v => Math.max(1,v - 1))} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Previous page"><ChevronLeft className="h-4 w-4"/></button><span className="min-w-16 text-center font-semibold text-slate-700">{currentPage} / {totalPages}</span><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage(v => Math.min(totalPages,v + 1))} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" aria-label="Next page"><ChevronRight className="h-4 w-4"/></button></div></div>
+        </>}
+      </section>
 
       {modalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -456,11 +637,36 @@ export default function Products() {
               {activeTab === "basic" && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2"><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Product Title (English) *</label><input type="text" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 bg-slate-50" /></div>
+                    <div className="col-span-2"><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Product Title (English) *</label><input type="text" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} onBlur={() => { if (editingId == null && !formData.category_id) suggestCategory(); }} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 bg-slate-50" /></div>
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Product Title (Sinhala)</label><input type="text" value={formData.name_si} onChange={e => setFormData({ ...formData, name_si: e.target.value })} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 bg-slate-50" /></div>
                   </div>
                   <div className="grid grid-cols-3 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Category *</label><select value={formData.category_id} onChange={e => setFormData({ ...formData, category_id: e.target.value })} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-slate-50">{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                    <div><div className="flex flex-wrap items-center justify-between gap-1 mb-1">
+                      <label htmlFor="product-category" className="text-xs font-bold text-slate-600 uppercase">Category *</label>
+                      <button type="button" disabled={creatingCategory} onClick={() => suggestCategory(true)} className="text-xs font-semibold text-indigo-700 hover:underline">Suggest Category</button>
+                    </div><select id="product-category" required value={String(formData.category_id ?? "")} onChange={e => setFormData({ ...formData, category_id: e.target.value })} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-slate-50">
+                      <option value="" disabled>Select Category</option>
+                      {formData.category_id && !categories.some(c => String(c.id) === String(formData.category_id)) && (
+                        <option value={String(formData.category_id)}>Saved category #{formData.category_id}</option>
+                      )}
+                      {categories.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+                    </select>
+                    {categoryNotice && <p role="status" className="mt-1 text-xs text-slate-600">{categoryNotice}</p>}
+                    {newCategory !== null && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <input type="text" aria-label="New category name" placeholder="New category name"
+                          value={newCategory} onChange={event => setNewCategory(event.target.value)}
+                          onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); createCategory(); } }}
+                          disabled={creatingCategory}
+                          className="w-full rounded-lg border border-slate-200 p-2 text-sm" />
+                        <button type="button" disabled={creatingCategory || !newCategory.trim()}
+                          onClick={createCategory}
+                          className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                          {creatingCategory ? "Adding…" : "Add Category"}
+                        </button>
+                      </div>
+                    )}
+                    </div>
                     <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Status</label><select value={formData.is_active} onChange={e => setFormData({ ...formData, is_active: parseInt(e.target.value) })} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-slate-50"><option value={1}>Active (Visible)</option><option value={0}>Hidden (Draft)</option></select></div>
                     <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Stock Quantity *</label><input type="number" required value={formData.stock_qty} onChange={e => setFormData({ ...formData, stock_qty: parseInt(e.target.value) || 0 })} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-slate-50" /></div>
                   </div>
@@ -627,6 +833,53 @@ export default function Products() {
                     <p className="text-xs text-slate-500 mt-1">
                       Select only the actual manufacturer brand. Manage brands in the Brands section.
                     </p>
+                  </div>
+
+                  {/* NN-SEO-IDENTIFIERS-17D */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                        GTIN / Barcode (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        maxLength={14}
+                        value={formData.gtin || ""}
+                        onChange={e => setFormData(prev => ({
+                          ...prev,
+                          gtin: e.target.value
+                        }))}
+                        placeholder="EAN / UPC / GTIN"
+                        className="w-full border border-slate-200 p-2.5 rounded-lg text-sm"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Enter the real manufacturer barcode only.
+                        Supports GTIN-8, UPC-12, EAN-13 and GTIN-14.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                        MPN / Manufacturer Part Number (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={100}
+                        value={formData.mpn || ""}
+                        onChange={e => setFormData(prev => ({
+                          ...prev,
+                          mpn: e.target.value
+                        }))}
+                        placeholder="e.g. Manufacturer model code"
+                        className="w-full border border-slate-200 p-2.5 rounded-lg text-sm"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Use the actual manufacturer part number.
+                        Leave blank if unknown.
+                      </p>
+                    </div>
                   </div>
 
                   <div>
